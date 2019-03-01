@@ -1,1 +1,1 @@
-# R-Pir-mide-de-poblaci-n
+# R-Pirámide de población
