@@ -1,0 +1,435 @@
+---
+title: "R Notebook - TFM - Pirámide de población en España con datos del año 2017"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+## El objetivo de éste Notebook en R es presentar la pirámide de población en España, y compararla con la pirámide de despoblación
+
+- Se obtienen los datos de población del DATASET piramide.csv preparado en la fase previa
+
+
+```{r}
+rm(list=ls())
+#setwd("/tfm/") Modificad con el Working Directory elegido
+
+piramide_data <- read.csv2("data/piramide.csv",fileEncoding="UTF-8",header=T, stringsAsFactors=FALSE, quote='', dec='.' )
+                                                                                                    
+```
+
+## Se comprueba la estructura del dataset
+```{r}
+str(piramide_data)
+head(piramide_data)
+dim(piramide_data)
+```
+## PIRÁMIDE DE POBLACIÓN - PREPARACIÓN DE LOS DATOS
+```{r}
+# Se descartan las filas con los datos de AMBOS SEXOS (T)
+df <- piramide_data[!grepl("T", piramide_data$SEXO),]
+
+# Seleccionamos las filas con DESPOBLACION = 1
+df <- df[grepl(1, df$DESPOBLACION),]
+
+# Se seleccionan las columnas con la EDAD (X0-X100)
+dfedad <- df[c(3,5:105)]
+dfcolumns <- df[c(5:105)]
+
+# Se agregan los valores por SEXO
+df <-aggregate(dfcolumns, by=list(Sexo = dfedad$SEXO), FUN= sum)
+
+# Se trata el dataframe para preparar la pirámide
+tr <- data.frame(t(df))
+tr <- tr[which(tr$X1 != "H"),]
+names(tr)[1] <- "HOMBRES"
+names(tr)[2] <- "MUJERES"
+
+tr$EDAD <- seq.int(nrow(tr))-1
+
+str(tr)
+```
+## PIRAMIDE DE POBLACION usando la librería plotrix
+```{r}
+#Cargamos las siguientes librerías
+is.installed <- function(paquete) is.element(paquete, installed.packages())
+if(!is.installed('plotrix'))
+install.packages('plotrix')
+library(plotrix)
+
+dfpiramide <- transform(tr, bin = cut(EDAD, 20, labels=c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")))
+library(dplyr)
+dfpiramide <- select(dfpiramide, HOMBRES, MUJERES, bin)
+dfpiramide$HOMBRES <- as.numeric(as.character(dfpiramide$HOMBRES))
+dfpiramide$MUJERES <- as.numeric(as.character(dfpiramide$MUJERES))
+
+dfpiramide <-aggregate(list(dfpiramide$HOMBRES, dfpiramide$MUJERES), by=list(grupo = dfpiramide$bin), FUN= sum)
+names(dfpiramide)[2] <- "HOMBRES"
+names(dfpiramide)[3] <- "MUJERES"
+
+#Calculamos los porcentajes
+dfpiramide <- transform(dfpiramide, pctH = 100 * HOMBRES/sum(dfpiramide$HOMBRES))
+dfpiramide <- transform(dfpiramide, pctM = 100 * MUJERES/sum(dfpiramide$MUJERES))
+dfpiramide$pctH <- as.numeric(as.character(dfpiramide$pctH))
+dfpiramide$pctM <- as.numeric(as.character(dfpiramide$pctM))
+
+xy.pop<-dfpiramide$pctH
+xx.pop<-dfpiramide$pctM
+ agelabels<-c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")
+
+mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),20)
+fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),20)
+par(mar=pyramid.plot(xy.pop,xx.pop,labels=agelabels,
+  main="Pirámide de población en municipios con densidad de población < 12.5",lxcol=mcol,rxcol=fcol,
+  gap=1,space=0.3,top.labels=c("Hombres","Edad","Mujeres"),show.values=TRUE))
+```
+
+
+
+
+## PIRAMIDE DE POBLACION usando la librería ggplot
+
+```{r}
+#Cargamos las siguientes librerías
+library(reshape2)
+library(ggplot2)
+library(plyr)
+require(RColorBrewer)
+
+dfpiramide2 <- dfpiramide
+
+dfpiramide2$pctH <- -1*dfpiramide2$pctH
+
+names(dfpiramide2)[4] <- "% HOMBRES"
+names(dfpiramide2)[5] <- "% MUJERES"
+
+#Funde el dataframe y le proporciona una forma adecuada a nuestros valores
+dfpiramide2.melt <- melt(dfpiramide2, id.vars='grupo', measure.vars=c("% HOMBRES", "% MUJERES"), value.name = 'Poblacion', variable.name = 'Sexo')
+#Hacemos la pirámide con ggplot
+piramide<-ggplot(dfpiramide2.melt, aes(x=grupo, y=Poblacion, fill=Sexo)) +
+  geom_bar(stat="identity")+
+  ylab("%") +
+  xlab("EDAD") +
+  geom_bar(data = subset(dfpiramide2.melt, Sexo == "% HOMBRES"), stat = "identity") +
+  geom_bar(data = subset(dfpiramide2.melt, Sexo == "% MUJERES"), stat = "identity") +
+  ggtitle("Pirámide de población en municipios con densidad de población < 12.5") +
+  scale_y_continuous(
+    breaks = seq(-8, 8, by = 2), 
+    labels = c(rev(seq(0, 8, by = 2)), seq(2, 8, by = 2))) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1")+ 
+  theme_bw()
+  
+piramide
+```
+## PIRAMIDE DE POBLACIÓN EN ZONAS EN RIESGO DE DESPOBLACIÓN (Densidad < 12.5)
+```{r}
+# Descartamos las filas con los datos de AMBOS SEXOS (T)
+dfdesp <- piramide_data[!grepl("T", piramide_data$SEXO),]
+
+# Seleccionamos las filas con DESPOBLACION = 1
+dfdesp <- dfdesp[grepl(1, dfdesp$DESPOBLACION),]
+
+# Seleccionamos las columnas con la EDAD (X0-X100)
+dfedad <- dfdesp[c(3,5:105)]
+dfcolumns <- dfdesp[c(5:105)]
+
+# Agregamos los valores por SEXO
+dfagdesp <-aggregate(dfcolumns, by=list(Sexo = dfedad$SEXO), FUN= sum)
+
+# Tratamos el data frame para prepararlo para la representación piramidal
+trdesp <- data.frame(t(dfagdesp))
+tr2desp <- trdesp[which(trdesp$X1 != "H"),]
+names(tr2desp)[1] <- "HOMBRES"
+names(tr2desp)[2] <- "MUJERES"
+tr2desp$EDAD <- seq.int(nrow(tr2desp))-1
+#Pasamos los valores de EDAD a factor para que aparezcan ordenados
+tr2desp$EDAD <-factor(tr2desp$EDAD, levels=tr2desp$EDAD, labels=tr2desp$EDAD)
+#Cambiamos el valor de HOMBRES a negativo para que aparezcan en la parte izquierda de la gráfica. 
+tr2desp$HOMBRES <- as.numeric(as.character(tr2desp$HOMBRES))
+tr2desp$MUJERES <- as.numeric(as.character(tr2desp$MUJERES))
+tr2desp$HOMBRES <- -1*tr2desp$HOMBRES
+str(tr2desp)
+```
+## PIRAMIDE DESPOBLACION
+```{r}
+#Cargamos las siguientes librerías
+library(reshape2)
+library(ggplot2)
+library(plyr)
+require(RColorBrewer)
+
+#Funde el dataframe y le proporciona una forma adecuada a nuestros valores
+tr2desp.melt <- melt(tr2desp, id.vars='EDAD', value.name = 'Poblacion', variable.name = 'Sexo')
+#Hacemos la pirámide con ggplot
+piramidedesp<-ggplot(tr2desp.melt, aes(x=EDAD, y=Poblacion, fill=Sexo)) +
+  geom_bar(subset=.(Sexo=="MUJERES"),stat="identity")+
+  geom_bar(subset=.(Sexo=="HOMBRES"),stat="identity")+
+  scale_y_continuous(breaks = seq(-40000,40000,10000),
+                     labels = paste0(as.character(c(4:0,1:4)),"m"))+
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1")+ 
+  theme_bw()
+  
+piramidedesp
+```
+
+```{r}
+library(plyr) 
+# Summarize a dataset by two variables 
+dfx <- data.frame( group = c(rep('A', 8), rep('B', 15), rep('C', 6)), sex = sample(c("M", "F"), size = 29, replace = TRUE), age = runif(n = 29, min = 18, max = 54) ) 
+# Note the use of the '.' function to allow 
+# group and sex to be used without quoting 
+ddply(dfx, .(group, sex), summarize, mean = round(mean(age), 2), sd = round(sd(age), 2)) 
+# An example using a formula for .variables 
+ddply(baseball[1:100,], ~ year, nrow) 
+# Applying two functions; nrow and ncol 
+ddply(baseball, .(lg), c("nrow", "ncol")) 
+# Calculate mean runs batted in for each year 
+rbi <- ddply(baseball, .(year), summarise, mean_rbi = mean(rbi, na.rm = TRUE)) 
+# Plot a line chart of the result 
+plot(mean_rbi ~ year, type = "l", data = rbi) 
+# make new variable career_year based on the 
+# start year for each player (id) 
+base2 <- ddply(baseball, .(id), mutate, career_year = year - min(year) + 1 )
+```
+
+```{r}
+#Cargamos las siguientes librerías
+is.installed <- function(paquete) is.element(paquete, installed.packages())
+if(!is.installed('plotrix'))
+install.packages('plotrix')
+library(plotrix)
+ xy.pop<-c(3.2,3.5,3.6,3.6,3.5,3.5,3.9,3.7,3.9,3.5,3.2,2.8,2.2,1.8,
+  1.5,1.3,0.7,0.4)
+ xx.pop<-c(3.2,3.4,3.5,3.5,3.5,3.7,4,3.8,3.9,3.6,3.2,2.5,2,1.7,1.5,
+  1.3,1,0.8)
+ agelabels<-c("0-4","5-9","10-14","15-19","20-24","25-29","30-34",
+  "35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74",
+  "75-79","80-44","85+")
+ mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),18)
+ fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),18)
+ par(mar=pyramid.plot(xy.pop,xx.pop,labels=agelabels,
+  main="Australian population pyramid 2002",lxcol=mcol,rxcol=fcol,
+  gap=0.5,show.values=TRUE))
+ 
+ 
+ 
+ xy.pop<-c(3.2,3.5,3.6,3.6,3.5,3.5,3.9,3.7,3.9,3.5,3.2,2.8,2.2,1.8,
+  1.5,1.3,0.7,0.4)
+ xx.pop<-c(3.2,3.4,3.5,3.5,3.5,3.7,4,3.8,3.9,3.6,3.2,2.5,2,1.7,1.5,
+  1.3,1,0.8)
+ agelabels<-c("0-4","5-9","10-14","15-19","20-24","25-29","30-34",
+  "35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74",
+  "75-79","80-44","85+")
+ mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),18)
+ fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),18)
+ par(mar=pyramid.plot(xy.pop,xx.pop,labels=agelabels,
+  main="Australian population pyramid 2002",lxcol=mcol,rxcol=fcol,
+  gap=0.5,show.values=TRUE))
+ # three column matrices
+ avtemp<-c(seq(11,2,by=-1),rep(2:6,each=2),seq(11,2,by=-1))
+ malecook<-matrix(avtemp+sample(-2:2,30,TRUE),ncol=3)
+ femalecook<-matrix(avtemp+sample(-2:2,30,TRUE),ncol=3)
+ # group by age
+ agegrps<-c("0-10","11-20","21-30","31-40","41-50","51-60",
+  "61-70","71-80","81-90","91+")
+ oldmar<-pyramid.plot(malecook,femalecook,labels=agegrps,
+  unit="Bowls per month",lxcol=c("#ff0000","#eeee88","#0000ff"),
+  rxcol=c("#ff0000","#eeee88","#0000ff"),laxlab=c(0,10,20,30),
+  raxlab=c(0,10,20,30),top.labels=c("Males","Age","Females"),gap=4,
+  do.first="plot_bg(\"#eedd55\")")
+ # put a box around it
+ box()
+ # give it a title
+ mtext("Porridge temperature by age and sex of bear",3,2,cex=1.5)
+ # stick in a legend
+ legend(par("usr")[1],11,c("Too hot","Just right","Too cold"),
+  fill=c("#ff0000","#eeee88","#0000ff"))
+ # don't forget to restore the margins and background
+ par(mar=oldmar,bg="transparent")
+
+ 
+```
+
+```{r}
+#Cargamos las siguientes librerías
+is.installed <- function(paquete) is.element(paquete, installed.packages())
+if(!is.installed('plotrix'))
+install.packages('plotrix')
+library(plotrix)
+
+# Se preparan los datos
+# Descartamos las filas con los datos de AMBOS SEXOS (T)
+dfdesp <- piramide_data[!grepl("T", piramide_data$SEXO),]
+
+# Seleccionamos las filas con DESPOBLACION = 1
+#dfdesp <- dfdesp[grepl(1, dfdesp$DESPOBLACION),]
+
+# Seleccionamos las columnas con la EDAD (X0-X100)
+dfedad <- dfdesp[c(3,5:105)]
+dfcolumns <- dfdesp[c(5:105)]
+
+# Agregamos los valores por SEXO
+dfagdesp <-aggregate(dfcolumns, by=list(Sexo = dfedad$SEXO), FUN= sum)
+
+# Tratamos el data frame para prepararlo para la representación piramidal
+trdesp <- data.frame(t(dfagdesp))
+tr2desp <- trdesp[which(trdesp$X1 != "H"),]
+names(tr2desp)[1] <- "HOMBRES"
+names(tr2desp)[2] <- "MUJERES"
+tr2desp$EDAD <- seq.int(nrow(tr2desp))-1
+#Pasamos los valores de EDAD a factor para que aparezcan ordenados
+#tr2desp$EDAD <-factor(tr2desp$EDAD, levels=tr2desp$EDAD, labels=tr2desp$EDAD)
+
+tr3desp <- transform(tr2desp, bin = cut(EDAD, 20, labels=c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")))
+library(dplyr)
+tr4desp <- select(tr3desp, HOMBRES, MUJERES, bin)
+tr4desp$HOMBRES <- as.numeric(as.character(tr4desp$HOMBRES))
+tr4desp$MUJERES <- as.numeric(as.character(tr4desp$MUJERES))
+#tr4desp$bin <- as.character(tr4desp$bin)
+
+str(tr4desp)
+
+tr4desp <-aggregate(list(tr4desp$HOMBRES, tr4desp$MUJERES), by=list(grupo = tr4desp$bin), FUN= sum)
+names(tr4desp)[2] <- "HOMBRES"
+names(tr4desp)[3] <- "MUJERES"
+
+#Calculamos los porcentajes
+tr4desp <- transform(tr4desp, Tot.HOMBRES = sum(tr4desp$HOMBRES))
+tr4desp <- transform(tr4desp, Tot.MUJERES = sum(tr4desp$MUJERES))
+#tr4desp <- transform(tr4desp, pctH = paste0(sprintf("%.2f", 100 * HOMBRES/Tot.HOMBRES),"%"))
+#tr4desp <- transform(tr4desp, pctM = paste0(sprintf("%.2f", 100 * MUJERES/Tot.MUJERES),"%"))
+tr4desp <- transform(tr4desp, pctH = 100 * HOMBRES/Tot.HOMBRES)
+tr4desp <- transform(tr4desp, pctM = 100 * MUJERES/Tot.MUJERES)
+tr4desp$pctH <- as.numeric(as.character(tr4desp$pctH))
+tr4desp$pctM <- as.numeric(as.character(tr4desp$pctM))
+
+
+#Cambiamos el valor de HOMBRES a negativo para que aparezcan en la parte izquierda de la gráfica. 
+#tr2desp$HOMBRES <- -1*tr2desp$HOMBRES
+str(tr4desp)
+
+
+
+ xy.pop<-tr4desp$pctH
+ xx.pop<-tr4desp$pctM
+ agelabels<-c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")
+
+ mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),20)
+ fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),20)
+ par(mar=pyramid.plot(xy.pop,xx.pop,labels=agelabels,
+  main="Pirámide de población española 2017",lxcol=mcol,rxcol=fcol,
+  gap=1,space=0.3,top.labels=c("Hombres","Edad","Mujeres"),show.values=TRUE))
+```
+
+```{r}
+#Cargamos las siguientes librerías
+is.installed <- function(paquete) is.element(paquete, installed.packages())
+if(!is.installed('plotrix'))
+install.packages('plotrix')
+library(plotrix)
+
+# Se preparan los datos
+# Descartamos las filas con los datos de AMBOS SEXOS (T)
+dfdesp <- piramide_data[!grepl("T", piramide_data$SEXO),]
+
+# Seleccionamos las filas con DESPOBLACION = 1
+dfdesp <- dfdesp[grepl(1, dfdesp$DESPOBLACION),]
+
+# Seleccionamos las columnas con la EDAD (X0-X100)
+dfedad <- dfdesp[c(3,5:105)]
+dfcolumns <- dfdesp[c(5:105)]
+
+# Agregamos los valores por SEXO
+dfagdesp <-aggregate(dfcolumns, by=list(Sexo = dfedad$SEXO), FUN= sum)
+
+# Tratamos el data frame para prepararlo para la representación piramidal
+trdesp <- data.frame(t(dfagdesp))
+tr2desp <- trdesp[which(trdesp$X1 != "H"),]
+names(tr2desp)[1] <- "HOMBRES"
+names(tr2desp)[2] <- "MUJERES"
+tr2desp$EDAD <- seq.int(nrow(tr2desp))-1
+#Pasamos los valores de EDAD a factor para que aparezcan ordenados
+#tr2desp$EDAD <-factor(tr2desp$EDAD, levels=tr2desp$EDAD, labels=tr2desp$EDAD)
+
+tr3desp <- transform(tr2desp, bin = cut(EDAD, 20, labels=c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")))
+library(dplyr)
+tr4desp <- select(tr3desp, HOMBRES, MUJERES, bin)
+tr4desp$HOMBRES <- as.numeric(as.character(tr4desp$HOMBRES))
+tr4desp$MUJERES <- as.numeric(as.character(tr4desp$MUJERES))
+#tr4desp$bin <- as.character(tr4desp$bin)
+
+str(tr4desp)
+
+tr4desp <-aggregate(list(tr4desp$HOMBRES, tr4desp$MUJERES), by=list(grupo = tr4desp$bin), FUN= sum)
+names(tr4desp)[2] <- "HOMBRES"
+names(tr4desp)[3] <- "MUJERES"
+
+#Calculamos los porcentajes
+tr4desp <- transform(tr4desp, Tot.HOMBRES = sum(tr4desp$HOMBRES))
+tr4desp <- transform(tr4desp, Tot.MUJERES = sum(tr4desp$MUJERES))
+#tr4desp <- transform(tr4desp, pctH = paste0(sprintf("%.2f", 100 * HOMBRES/Tot.HOMBRES),"%"))
+#tr4desp <- transform(tr4desp, pctM = paste0(sprintf("%.2f", 100 * MUJERES/Tot.MUJERES),"%"))
+tr4desp <- transform(tr4desp, pctH = 100 * HOMBRES/Tot.HOMBRES)
+tr4desp <- transform(tr4desp, pctM = 100 * MUJERES/Tot.MUJERES)
+tr4desp$pctH <- as.numeric(as.character(tr4desp$pctH))
+tr4desp$pctM <- as.numeric(as.character(tr4desp$pctM))
+
+
+#Cambiamos el valor de HOMBRES a negativo para que aparezcan en la parte izquierda de la gráfica. 
+#tr2desp$HOMBRES <- -1*tr2desp$HOMBRES
+str(tr4desp)
+
+
+
+ xy.pop<-tr4desp$pctH
+ xx.pop<-tr4desp$pctM
+ agelabels<-c("0-5","6-10","11-15","16-20","21-25","26-30","31-35","36-40","41-45","46-50","51-55","56-60","61-65","66-70","71-75","76-80","81-85","86-90","91-95","96+")
+
+ mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),20)
+ fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),20)
+ par(mar=pyramid.plot(xy.pop,xx.pop,labels=agelabels,
+  main="Pirámide de población española 2017 (sólo municipios con densidad de población < 12.5 habitantes / km2)",lxcol=mcol,rxcol=fcol,
+  gap=1,space=0.3,top.labels=c("Hombres","Edad","Mujeres"),show.values=TRUE))
+```
+```{r}
+# Your data
+xy.pop<-c(3.2,3.5,3.6,3.6,3.5,3.5,3.9,3.7,3.9,3.5,3.2,2.8,2.2,1.8,1.5,1.3,0.7,0.4)
+xx.pop<-c(3.2,3.4,3.5,3.5,3.5,3.7,4,3.8,3.9,3.6,3.2,2.5,2,1.7,1.5,1.3,1,0.8)
+agelabels<-c("0-4","5-9","10-14","15-19","20-24","25-29","30-34",
+            "35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74",
+            "75-79","80-44","85+")
+
+# Collect data in dataframe
+df <- rbind.data.frame(
+    cbind.data.frame(Percentage = -xy.pop, Group = agelabels, Gender = "male"),
+    cbind.data.frame(Percentage = +xx.pop, Group = agelabels, Gender = "female"));
+
+# Make sure agelabels have the right order
+df$Group <- factor(df$Group, levels = agelabels);
+
+# (gg)plot
+gg <- ggplot(
+    data = df, 
+    aes(x = Group, y = Percentage, fill = Gender, group = Gender));
+gg <- gg + geom_bar(data = subset(df, Gender == "female"), stat = "identity");
+gg <- gg + geom_bar(data = subset(df, Gender == "male"), stat = "identity");
+gg <- gg + coord_flip();
+gg <- gg + geom_smooth(
+    colour = "black", method = "loess", se = FALSE, show.legend = FALSE, size = 2);
+gg <- gg + labs(
+    x = "Age", 
+    y = "Percentage", 
+    title = "Australian population pyramid 2012");
+gg <- gg + scale_y_continuous(
+    breaks = seq(-4, 4, by = 2), 
+    labels = c(rev(seq(0, 4, by = 2)), seq(2, 4, by = 2)));
+print(gg)
+```
+
+
+
